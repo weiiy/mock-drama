@@ -24,15 +24,287 @@ Future<void> main() async {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Drama Demo',
+      title: 'AI 互动剧本',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        useMaterial3: true,
       ),
-      home: const DialoguePage(title: '崇祯剧本'),
+      home: const StorySelectionPage(),
+    );
+  }
+}
+
+// 剧本数据模型
+class Story {
+  final String id;
+  final String title;
+  final String description;
+  final String coverImage;
+  final String systemPrompt;
+  final List<String> tags;
+  final String edgeFunctionName; // 对应的 Edge Function 名称
+
+  const Story({
+    required this.id,
+    required this.title,
+    required this.description,
+    required this.coverImage,
+    required this.systemPrompt,
+    required this.tags,
+    required this.edgeFunctionName,
+  });
+}
+
+// 示例剧本数据
+final List<Story> availableStories = [
+  Story(
+    id: 'chongzhen',
+    title: '崇祯皇帝',
+    description: '崇祯元年，天启皇帝暴毙，你仓促即位。朝堂上，阉党余波仍掌锦衣卫，东林士人与勋戚互相攻讦；边疆上，后金铁骑连陷辽东，山海关风雨飘摇；民间因连年旱涝、蝗灾与赋役失序而生怨，西北、江淮盗乱四起。你能否力挽狂澜，拯救大明王朝？',
+    coverImage: '🏯',
+    systemPrompt: '崇祯元年，天启皇帝暴毙，你仓促即位。朝堂上，阉党余波仍掌锦衣卫，东林士人与勋戚互相攻讦；边疆上，后金铁骑连陷辽东，山海关风雨飘摇；民间因连年旱涝、蝗灾与赋役失序而生怨，西北、江淮盗乱四起。请先以皇帝视角概述大明当下的危局，然后提出你筹划的首要对策与施政重点。',
+    tags: ['历史', '策略', '明朝'],
+    edgeFunctionName: 'chongzhen',
+  ),
+  Story(
+    id: 'fantasy_adventure',
+    title: '魔法学院',
+    description: '你是一名刚入学的魔法学徒，在神秘的阿卡纳魔法学院开始了你的冒险。学院中隐藏着古老的秘密，黑暗势力蠢蠢欲动。你将学习魔法、结交伙伴，揭开学院背后的真相。',
+    coverImage: '🔮',
+    systemPrompt: '你是阿卡纳魔法学院的一年级新生。今天是开学第一天，你站在宏伟的学院大门前，手中握着录取通知书。学院的高塔直插云霄，空气中弥漫着魔法的气息。请描述你的角色背景，以及你对魔法学院的第一印象和期待。',
+    tags: ['奇幻', '冒险', '魔法'],
+    edgeFunctionName: 'fantasy',
+  ),
+  Story(
+    id: 'cyberpunk',
+    title: '赛博朋克 2177',
+    description: '2177年，人类与AI共存的时代。你是一名赛博侦探，在霓虹闪烁的巨型都市中追查真相。企业巨头操控一切，地下黑客反抗压迫。在这个光怪陆离的世界，你将如何选择自己的道路？',
+    coverImage: '🤖',
+    systemPrompt: '2177年，新东京。你是一名独立赛博侦探，刚刚接到一个神秘委托。委托人声称发现了某大型企业的黑幕，但在约定见面前失踪了。你的义体改造让你拥有超越常人的能力，但也让你背负沉重的债务。请描述你的角色设定和当前处境。',
+    tags: ['科幻', '悬疑', '赛博朋克'],
+    edgeFunctionName: 'cyberpunk',
+  ),
+];
+
+// 剧本选择页面
+class StorySelectionPage extends StatelessWidget {
+  const StorySelectionPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('选择你的冒险'),
+        centerTitle: true,
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '探索无限可能的故事',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '每个选择都会影响故事的走向',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Colors.grey[600],
+              ),
+            ),
+            const SizedBox(height: 24),
+            Expanded(
+              child: ListView.builder(
+                itemCount: availableStories.length,
+                itemBuilder: (context, index) {
+                  final story = availableStories[index];
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => StoryDetailPage(story: story),
+                          ),
+                        );
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // 封面图标
+                            Container(
+                              width: 80,
+                              height: 80,
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.primaryContainer,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  story.coverImage,
+                                  style: const TextStyle(fontSize: 40),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            // 剧本信息
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    story.title,
+                                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    story.description,
+                                    style: Theme.of(context).textTheme.bodyMedium,
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Wrap(
+                                    spacing: 8,
+                                    children: story.tags.map((tag) {
+                                      return Chip(
+                                        label: Text(tag),
+                                        labelStyle: const TextStyle(fontSize: 12),
+                                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      );
+                                    }).toList(),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Icon(Icons.chevron_right),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// 剧本详情页面
+class StoryDetailPage extends StatelessWidget {
+  final Story story;
+
+  const StoryDetailPage({super.key, required this.story});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(story.title),
+      ),
+      body: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 封面区域
+            Container(
+              height: 200,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Theme.of(context).colorScheme.primaryContainer,
+                    Theme.of(context).colorScheme.secondaryContainer,
+                  ],
+                ),
+              ),
+              child: Center(
+                child: Text(
+                  story.coverImage,
+                  style: const TextStyle(fontSize: 100),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 标题
+                  Text(
+                    story.title,
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // 标签
+                  Wrap(
+                    spacing: 8,
+                    children: story.tags.map((tag) {
+                      return Chip(
+                        label: Text(tag),
+                        backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 24),
+                  // 剧本简介
+                  Text(
+                    '剧本简介',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    story.description,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      height: 1.6,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  // 开始游戏按钮
+                  FilledButton(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => DialoguePage(
+                            story: story,
+                          ),
+                        ),
+                      );
+                    },
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(56),
+                      textStyle: const TextStyle(fontSize: 18),
+                    ),
+                    child: const Text('开始冒险'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -49,22 +321,16 @@ class ChatMessage {
 }
 
 class DialoguePage extends StatefulWidget {
-  const DialoguePage({super.key, required this.title});
+  const DialoguePage({super.key, required this.story});
 
-  final String title;
+  final Story story;
 
   @override
   State<DialoguePage> createState() => _DialoguePageState();
 }
 
 class _DialoguePageState extends State<DialoguePage> {
-  final List<ChatMessage> _messages = [
-    const ChatMessage(
-      role: MessageRole.system,
-      content:
-          '崇祯元年，天启皇帝暴毙，你仓促即位。朝堂上，阉党余波仍掌锦衣卫，东林士人与勋戚互相攻讦；边疆上，后金铁骑连陷辽东，山海关风雨飘摇；民间因连年旱涝、蝗灾与赋役失序而生怨，西北、江淮盗乱四起。请先以皇帝视角概述大明当下的危局，然后提出你筹划的首要对策与施政重点。',
-    ),
-  ];
+  late final List<ChatMessage> _messages;
   final TextEditingController _controller = TextEditingController();
   bool _isSending = false;
   String? _sessionId;
@@ -81,6 +347,12 @@ class _DialoguePageState extends State<DialoguePage> {
   @override
   void initState() {
     super.initState();
+    _messages = [
+      ChatMessage(
+        role: MessageRole.system,
+        content: widget.story.systemPrompt,
+      ),
+    ];
     _initializeSession();
   }
 
@@ -175,8 +447,8 @@ class _DialoguePageState extends State<DialoguePage> {
         // 创建新会话
         final sessionResponse = await client.from('chat_sessions').insert({
           'user_id': _userId,
-          'title': '崇祯帝之旅',
-          'synopsis': '大明王朝模拟剧本',
+          'title': widget.story.title,
+          'synopsis': widget.story.description,
         }).select().single();
 
         setState(() {
@@ -234,7 +506,8 @@ class _DialoguePageState extends State<DialoguePage> {
         return;
       }
 
-      final url = Uri.parse('$supabaseUrl/functions/v1/orchestrator');
+      // 使用剧本对应的 Edge Function
+      final url = Uri.parse('$supabaseUrl/functions/v1/${widget.story.edgeFunctionName}');
       final request = http.Request('POST', url);
       request.headers.addAll({
         'Authorization': 'Bearer $supabaseAnonKey',
@@ -318,7 +591,13 @@ class _DialoguePageState extends State<DialoguePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
+      appBar: AppBar(
+        title: Text(widget.story.title),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
       body: Column(
         children: [
           Expanded(
@@ -370,7 +649,7 @@ class _DialoguePageState extends State<DialoguePage> {
                     minLines: 1,
                     maxLines: 4,
                     decoration: const InputDecoration(
-                      hintText: '输入你作为崇祯皇帝的决策...',
+                      hintText: '输入你的选择和行动...',
                       border: OutlineInputBorder(),
                     ),
                   ),

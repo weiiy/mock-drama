@@ -1,3 +1,7 @@
+/**
+ * 魔法学院剧本专用 Edge Function
+ */
+
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { 
   streamReplicateOutput, 
@@ -18,6 +22,11 @@ const corsHeaders = {
 
 const replicateToken = Deno.env.get("REPLICATE_API_TOKEN");
 
+const FANTASY_FORMAT_INSTRUCTION: ReplicateMessage = {
+  role: "system",
+  content:
+    "你是阿卡纳魔法学院的导师。请用中文输出，按照以下格式组织回复：\n\n✨ 场景：<描述当前场景和氛围>\n\n📜 剧情：<详细描述事件发展，至少两段>\n\n🎯 选项：<提供2-3个可选的行动方案>\n\n请保持奇幻风格，注重魔法世界的细节描写。",
+};
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -41,37 +50,24 @@ serve(async (req) => {
   const messages = bodyObj.messages as ReplicateMessage[] | undefined;
   const sessionId = bodyObj.sessionId as string | undefined;
   const userId = bodyObj.userId as string | undefined;
-  const formatInstruction = bodyObj.formatInstruction as ReplicateMessage | undefined;
   
   if (!Array.isArray(messages)) {
     return new Response("缺少 messages 数组", { status: 400, headers: corsHeaders });
   }
   
-  // 初始化 Supabase 客户端
   const supabase = createSupabaseClient();
+  const formattedMessages = [FANTASY_FORMAT_INSTRUCTION, ...messages];
 
-  // 如果提供了格式化指令，添加到消息列表开头
-  const formattedMessages = formatInstruction 
-    ? [formatInstruction, ...messages]
-    : messages;
-
-  // 保存用户消息到数据库
   const userMessage = messages[messages.length - 1];
   if (sessionId && userId && userMessage && userMessage.role === 'user') {
     await saveUserMessage(supabase, sessionId, userMessage.content);
   }
 
-  // 创建 Replicate 预测
   const streamUrl = await createReplicatePrediction(
-    {
-      messages: formattedMessages,
-      maxOutputTokens: 1024,
-      reasoningEffort: "medium",
-    },
+    { messages: formattedMessages, maxOutputTokens: 1024, reasoningEffort: "medium" },
     replicateToken,
   );
 
-  // 使用流式响应
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
@@ -80,27 +76,18 @@ serve(async (req) => {
       try {
         for await (const delta of streamReplicateOutput(streamUrl, replicateToken)) {
           rawOutput += delta;
-          
-          // 将增量内容推送给客户端
-          const data = `data: ${JSON.stringify({ delta })}\n\n`;
-          controller.enqueue(encoder.encode(data));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ delta })}\n\n`));
         }
         
-        // 推送最终结果（不做额外处理）
-        controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ final: rawOutput })}\n\n`),
-        );
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ final: rawOutput })}\n\n`));
         
-        // 保存 AI 回复到数据库
         if (sessionId && userId && rawOutput) {
           await saveAssistantMessage(supabase, sessionId, rawOutput);
         }
         
-        // 发送结束标记
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       } catch (error) {
-        const errorMsg = `data: ${JSON.stringify({ error: String(error) })}\n\n`;
-        controller.enqueue(encoder.encode(errorMsg));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: String(error) })}\n\n`));
       } finally {
         controller.close();
       }
