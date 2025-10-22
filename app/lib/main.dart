@@ -61,7 +61,8 @@ class _DialoguePageState extends State<DialoguePage> {
   final List<ChatMessage> _messages = [
     const ChatMessage(
       role: MessageRole.system,
-      content: '话说崇祯元年，你新登大位，面临阉党余波、东林党纠纷、后金入侵与民间灾荒的四重危机。请以皇帝视角描述你的应对思路。',
+      content:
+          '崇祯元年，天启皇帝暴毙，你仓促即位。朝堂上，阉党余波仍掌锦衣卫，东林士人与勋戚互相攻讦；边疆上，后金铁骑连陷辽东，山海关风雨飘摇；民间因连年旱涝、蝗灾与赋役失序而生怨，西北、江淮盗乱四起。请先以皇帝视角概述大明当下的危局，然后提出你筹划的首要对策与施政重点。',
     ),
   ];
   final TextEditingController _controller = TextEditingController();
@@ -83,14 +84,92 @@ class _DialoguePageState extends State<DialoguePage> {
     _initializeSession();
   }
 
+  String _extractSection(String source, String start, String? end) {
+    final startIndex = source.indexOf(start);
+    if (startIndex == -1) {
+      return '';
+    }
+    final from = startIndex + start.length;
+    final endIndex = end == null ? -1 : source.indexOf(end, from);
+    if (endIndex == -1) {
+      return source.substring(from);
+    }
+    return source.substring(from, endIndex);
+  }
+
+  List<MapEntry<String, String>> _parseAssistantSections(String content) {
+    const headers = [
+      '回复：',
+      '📖剧情：',
+      '📊成果：',
+      '💡 提示：',
+    ];
+    final sections = <MapEntry<String, String>>[];
+    for (var i = 0; i < headers.length; i++) {
+      final start = headers[i];
+      final end = i + 1 < headers.length ? headers[i + 1] : null;
+      final text = _extractSection(content, start, end).trim();
+      if (text.isNotEmpty) {
+        sections.add(MapEntry(start, text));
+      }
+    }
+    return sections;
+  }
+
+  Widget _buildAssistantContent(BuildContext context, String content) {
+    final sections = _parseAssistantSections(content);
+    if (sections.isEmpty) {
+      return Text(content);
+    }
+    final theme = Theme.of(context);
+    final children = <Widget>[];
+    for (var i = 0; i < sections.length; i++) {
+      final entry = sections[i];
+      children.add(
+        Text(
+          entry.key,
+          style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+        ),
+      );
+      final paragraphs = entry.value.split(RegExp(r'\n\s*\n'));
+      for (var j = 0; j < paragraphs.length; j++) {
+        children.add(Padding(
+          padding: EdgeInsets.only(top: j == 0 ? 6 : 10),
+          child: Text(paragraphs[j]),
+        ));
+      }
+      if (i != sections.length - 1) {
+        children.add(const SizedBox(height: 14));
+      }
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: children,
+    );
+  }
+
+  Widget _buildMessageContent(BuildContext context, ChatMessage message) {
+    if (message.role == MessageRole.assistant) {
+      return _buildAssistantContent(context, message.content);
+    }
+    return Text(message.content);
+  }
+
   Future<void> _initializeSession() async {
     final client = _supabaseClient;
     if (client == null) return;
 
     try {
-      // 获取或创建用户
-      final authResponse = await client.auth.signInAnonymously();
-      _userId = authResponse.user?.id;
+      // 尝试匿名登录,如果失败则跳过(不影响功能)
+      try {
+        final authResponse = await client.auth.signInAnonymously();
+        _userId = authResponse.user?.id;
+      } catch (authError) {
+        debugPrint('匿名登录未启用,将不保存到数据库: $authError');
+        // 继续执行,只是不保存到数据库
+        return;
+      }
 
       if (_userId != null) {
         // 创建新会话
@@ -103,6 +182,7 @@ class _DialoguePageState extends State<DialoguePage> {
         setState(() {
           _sessionId = sessionResponse['id'] as String?;
         });
+        debugPrint('会话已创建: $_sessionId');
       }
     } catch (e) {
       debugPrint('初始化会话失败: $e');
@@ -175,33 +255,51 @@ class _DialoguePageState extends State<DialoguePage> {
         return;
       }
 
+      String accumulated = '';
+      var finalReceived = false;
+
       // 解析 SSE 流
       await for (final chunk in streamedResponse.stream.transform(utf8.decoder).transform(const LineSplitter())) {
-        if (chunk.startsWith('data: ')) {
-          final data = chunk.substring(6);
-          
-          if (data == '[DONE]') {
-            break;
-          }
-          
-          try {
-            final json = jsonDecode(data) as Map<String, dynamic>;
-            if (json.containsKey('chunk')) {
-              _updateStreamingMessage(json['chunk'] as String);
-            } else if (json.containsKey('error')) {
-              _updateStreamingMessage('错误: ${json['error']}');
-            }
-          } catch (e) {
-            debugPrint('解析 SSE 数据失败: $e');
-          }
+        if (!chunk.startsWith('data: ')) {
+          continue;
         }
+
+        final data = chunk.substring(6);
+
+        if (data == '[DONE]') {
+          break;
+        }
+
+        try {
+          final json = jsonDecode(data) as Map<String, dynamic>;
+          if (json.containsKey('delta')) {
+            final delta = json['delta'] as String? ?? '';
+            accumulated += delta;
+            _updateStreamingMessage(accumulated);
+          } else if (json.containsKey('final')) {
+            final finalText = json['final'] as String?;
+            if (finalText != null) {
+              accumulated = finalText;
+              finalReceived = true;
+              _updateStreamingMessage(finalText, isFinal: true);
+            }
+          } else if (json.containsKey('error')) {
+            _updateStreamingMessage('错误: ${json['error']}', isFinal: true);
+          }
+        } catch (e) {
+          debugPrint('解析 SSE 数据失败: $e');
+        }
+      }
+
+      if (!finalReceived && accumulated.isNotEmpty) {
+        _updateStreamingMessage(accumulated, isFinal: true);
       }
     } catch (error) {
       _updateStreamingMessage('Edge Function 未部署或调用失败：$error');
     }
   }
 
-  void _updateStreamingMessage(String content) {
+  void _updateStreamingMessage(String content, {bool isFinal = false}) {
     if (!mounted) return;
     setState(() {
       // 更新最后一条消息
@@ -210,6 +308,9 @@ class _DialoguePageState extends State<DialoguePage> {
           role: MessageRole.assistant,
           content: content,
         );
+      }
+      if (isFinal) {
+        _isSending = false;
       }
     });
   }
@@ -251,7 +352,7 @@ class _DialoguePageState extends State<DialoguePage> {
                       color: color,
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Text(message.content),
+                    child: _buildMessageContent(context, message),
                   ),
                 );
               },

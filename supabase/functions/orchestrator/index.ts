@@ -32,7 +32,6 @@ async function* streamReplicateOutput(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let fullOutput = "";
 
   try {
     while (true) {
@@ -44,7 +43,10 @@ async function* streamReplicateOutput(
       buffer = lines.pop() || "";
 
       for (const line of lines) {
-        if (line.startsWith("event: output")) {
+        if (!line || line.startsWith(":")) {
+          continue;
+        }
+        if (line.startsWith("event:")) {
           continue;
         }
         if (line.startsWith("data: ")) {
@@ -53,11 +55,10 @@ async function* streamReplicateOutput(
           
           try {
             const parsed = JSON.parse(data);
-            if (parsed.reason) continue; // done with reason
+            if (parsed.reason || parsed.event === "done") continue;
           } catch {
-            // 纯文本数据
-            fullOutput += data;
-            yield fullOutput;
+            // 纯文本数据 - 这是增量内容
+            yield data;
           }
         }
       }
@@ -203,24 +204,30 @@ serve(async (req) => {
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
-      let fullReply = "";
+      let rawOutput = "";
       
       try {
-        for await (const chunk of streamReplicateOutput(streamUrl)) {
-          fullReply = chunk;
-          const normalizedChunk = ensureTemplate(chunk);
+        for await (const delta of streamReplicateOutput(streamUrl)) {
+          rawOutput += delta;
           
-          // 发送 SSE 格式数据
-          const data = `data: ${JSON.stringify({ chunk: normalizedChunk })}\n\n`;
+          // 将增量内容推送给客户端
+          const data = `data: ${JSON.stringify({ delta })}\n\n`;
           controller.enqueue(encoder.encode(data));
         }
         
+        const normalizedReply = ensureTemplate(rawOutput);
+
+        // 推送最终格式化结果
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ final: normalizedReply })}\n\n`),
+        );
+        
         // 保存 AI 回复到数据库
-        if (sessionId && userId && fullReply) {
+        if (sessionId && userId && normalizedReply) {
           await supabase.from('chat_messages').insert({
             session_id: sessionId,
             role: 'assistant',
-            content: ensureTemplate(fullReply),
+            content: normalizedReply,
           });
         }
         
