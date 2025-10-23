@@ -189,7 +189,7 @@ class StoryAgentCrew:
             }
         """
         # 1. 加载会话状态
-        session = await self.load_session(session_id)
+        session = self.load_session(session_id)
         
         if session["is_completed"]:
             return {"error": "游戏已结束"}
@@ -223,11 +223,11 @@ class StoryAgentCrew:
         
         # 5. 解析结果并更新数据库
         parsed_result = self._parse_crew_result(result)
-        await self._update_database(session_id, parsed_result)
+        self._update_database(session_id, parsed_result)
         
         # 6. 检查是否需要生成结局
         if parsed_result["chapter_status"] == "ending":
-            ending = await self._generate_ending(session_id)
+            ending = self._generate_ending(session_id)
             parsed_result["ending"] = ending
         
         return parsed_result
@@ -354,10 +354,10 @@ class StoryAgentCrew:
         except Exception as e:
             return {"error": str(e)}
     
-    async def load_session(self, session_id: str) -> Dict[str, Any]:
+    def load_session(self, session_id: str) -> Dict[str, Any]:
         """加载会话状态"""
         # 从数据库加载
-        session_result = await self.supabase.table("game_sessions")\
+        session_result = self.supabase.table("game_sessions")\
             .select("*")\
             .eq("id", session_id)\
             .single()\
@@ -366,7 +366,7 @@ class StoryAgentCrew:
         session = session_result.data
         
         # 加载局势状态
-        situations_result = await self.supabase.table("situation_states")\
+        situations_result = self.supabase.table("situation_states")\
             .select("*")\
             .eq("session_id", session_id)\
             .execute()
@@ -374,7 +374,7 @@ class StoryAgentCrew:
         situations = {s["situation_id"]: s for s in situations_result.data}
         
         # 加载角色状态
-        characters_result = await self.supabase.table("character_states")\
+        characters_result = self.supabase.table("character_states")\
             .select("*")\
             .eq("session_id", session_id)\
             .execute()
@@ -387,7 +387,7 @@ class StoryAgentCrew:
             "characters": characters
         }
     
-    async def _update_database(
+    def _update_database(
         self,
         session_id: str,
         result: Dict[str, Any]
@@ -395,14 +395,14 @@ class StoryAgentCrew:
         """更新数据库"""
         # 更新局势
         if result.get("situation_update"):
-            await self.supabase.table("situation_states")\
+            self.supabase.table("situation_states")\
                 .update(result["situation_update"])\
                 .eq("session_id", session_id)\
                 .execute()
         
         # 更新角色
         for char_update in result.get("character_updates", []):
-            await self.supabase.table("character_states")\
+            self.supabase.table("character_states")\
                 .update(char_update)\
                 .eq("session_id", session_id)\
                 .eq("character_name", char_update["character_name"])\
@@ -410,20 +410,20 @@ class StoryAgentCrew:
         
         # 更新会话
         if result["chapter_status"] == "next_chapter":
-            await self.supabase.table("game_sessions")\
+            self.supabase.table("game_sessions")\
                 .update({"current_chapter": session["current_chapter"] + 1})\
                 .eq("id", session_id)\
                 .execute()
         elif result["chapter_status"] == "ending":
-            await self.supabase.table("game_sessions")\
+            self.supabase.table("game_sessions")\
                 .update({"is_completed": True})\
                 .eq("id", session_id)\
                 .execute()
     
-    async def _generate_ending(self, session_id: str) -> Dict[str, Any]:
+    def _generate_ending(self, session_id: str) -> Dict[str, Any]:
         """生成结局"""
         # 加载完成的局势
-        situations = await self.supabase.table("situation_states")\
+        situations = self.supabase.table("situation_states")\
             .select("*")\
             .eq("session_id", session_id)\
             .execute()
@@ -468,7 +468,7 @@ class StoryAgentCrew:
         result = crew.kickoff()
         
         # 保存结局
-        await self.supabase.table("endings").insert({
+        self.supabase.table("endings").insert({
             "session_id": session_id,
             "ending_content": result,
             "situations_completed": completed_situations
