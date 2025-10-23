@@ -1,0 +1,31 @@
+# Web Framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.6.1,<3.0.0
+python-dotenv>=1.0.0
+
+# Task Queue (可选，CrewAI 不需要)
+# celery[redis]>=5.3.6
+redis>=5.0.1
+
+# CrewAI
+crewai>=0.28.8
+crewai-tools>=0.2.6
+langchain>=0.1.20
+langchain-community>=0.0.38
+
+# LLM Providers
+replicate>=0.25.1
+anthropic>=0.18.1
+openai>=1.13.3,<2.0.0
+
+# Database
+supabase>=2.3.4
+psycopg2-binary>=2.9.9
+
+# Vector Embeddings
+sentence-transformers>=2.5.1
+
+# Utilities
+httpx>=0.26.0
+python-multipart>=0.0.9
