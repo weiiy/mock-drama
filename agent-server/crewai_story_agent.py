@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional
 from supabase import create_client, Client
 import json
 from datetime import datetime
+from replicate_llm import create_replicate_llm
 
 class StoryConfig:
     """剧本配置"""
@@ -114,6 +115,13 @@ class StoryAgentCrew:
         self.config = StoryConfig(story_id)
         self.story_id = story_id
         
+        # 创建 Replicate LLM
+        self.llm = create_replicate_llm(
+            model="openai/gpt-5-mini",
+            max_tokens=1024,
+            temperature=0.7
+        )
+        
         # 创建 Agents
         self.narrator = self._create_narrator()
         self.situation_judge = self._create_situation_judge()
@@ -128,7 +136,8 @@ class StoryAgentCrew:
             goal='根据玩家选择和当前局势生成生动的剧情描述',
             backstory=f'你是{self.story_id}剧本的叙事者，擅长历史故事创作',
             verbose=True,
-            allow_delegation=False
+            allow_delegation=False,
+            llm=self.llm
         )
     
     def _create_situation_judge(self) -> Agent:
@@ -138,7 +147,8 @@ class StoryAgentCrew:
             goal='评估玩家决策对当前局势的影响，计算局势分数变化',
             backstory='你是严谨的历史学家，能准确评估政治决策的影响',
             verbose=True,
-            allow_delegation=False
+            allow_delegation=False,
+            llm=self.llm
         )
     
     def _create_character_manager(self) -> Agent:
@@ -148,7 +158,8 @@ class StoryAgentCrew:
             goal='跟踪角色状态变化，确保角色行为符合其性格背景',
             backstory='你负责维护角色的一致性和合理性',
             verbose=True,
-            allow_delegation=False
+            allow_delegation=False,
+            llm=self.llm
         )
     
     def _create_chapter_coordinator(self) -> Agent:
@@ -158,7 +169,8 @@ class StoryAgentCrew:
             goal='根据局势完成情况决定是否推进到下一章节或结束游戏',
             backstory='你是游戏设计师，负责控制剧情节奏',
             verbose=True,
-            allow_delegation=False
+            allow_delegation=False,
+            llm=self.llm
         )
     
     def _create_ending_generator(self) -> Agent:
@@ -168,7 +180,8 @@ class StoryAgentCrew:
             goal='根据玩家完成的局势生成相应的结局',
             backstory='你是结局设计师，能根据玩家表现生成不同结局',
             verbose=True,
-            allow_delegation=False
+            allow_delegation=False,
+            llm=self.llm
         )
     
     async def process_user_action(
