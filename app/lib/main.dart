@@ -429,32 +429,29 @@ class _DialoguePageState extends State<DialoguePage> {
   }
 
   Future<void> _initializeSession() async {
-    final client = _supabaseClient;
-    if (client == null) return;
-
     try {
-      // 尝试匿名登录,如果失败则跳过(不影响功能)
-      try {
-        final authResponse = await client.auth.signInAnonymously();
-        _userId = authResponse.user?.id;
-      } catch (authError) {
-        debugPrint('匿名登录未启用,将不保存到数据库: $authError');
-        // 继续执行,只是不保存到数据库
-        return;
-      }
-
-      if (_userId != null) {
-        // 创建新会话
-        final sessionResponse = await client.from('chat_sessions').insert({
+      // 生成临时用户 ID
+      _userId = 'user_${DateTime.now().millisecondsSinceEpoch}';
+      
+      // 调用 Python 后端创建会话
+      final agentServerUrl = dotenv.env['AGENT_SERVER_URL'] ?? 'http://localhost:8000';
+      final response = await http.post(
+        Uri.parse('$agentServerUrl/api/session/create'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
           'user_id': _userId,
-          'title': widget.story.title,
-          'synopsis': widget.story.description,
-        }).select().single();
+          'story_id': widget.story.id, // 使用剧本 ID
+        }),
+      );
 
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
         setState(() {
-          _sessionId = sessionResponse['id'] as String?;
+          _sessionId = data['session_id'] as String?;
         });
         debugPrint('会话已创建: $_sessionId');
+      } else {
+        debugPrint('创建会话失败: ${response.statusCode} ${response.body}');
       }
     } catch (e) {
       debugPrint('初始化会话失败: $e');
@@ -491,84 +488,62 @@ class _DialoguePageState extends State<DialoguePage> {
   }
 
   Future<void> _invokeEdgeFunctionStream() async {
-    final client = _supabaseClient;
-    if (client == null) {
-      _updateStreamingMessage('Supabase 未初始化，请先在 .env 填写 SUPABASE_URL 与 SUPABASE_ANON_KEY。');
+    if (_sessionId == null) {
+      _updateStreamingMessage('会话未初始化');
       return;
     }
 
     try {
-      final supabaseUrl = dotenv.env['SUPABASE_URL'];
-      final supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'];
+      final agentServerUrl = dotenv.env['AGENT_SERVER_URL'] ?? 'http://localhost:8000';
       
-      if (supabaseUrl == null || supabaseAnonKey == null) {
-        _updateStreamingMessage('缺少 Supabase 配置');
-        return;
-      }
-
-      // 使用剧本对应的 Edge Function
-      final url = Uri.parse('$supabaseUrl/functions/v1/${widget.story.edgeFunctionName}');
+      // 获取用户最后一条消息
+      final userMessage = _messages.where((m) => m.role == MessageRole.user).last.content;
+      
+      // 调用 Python 后端处理用户行动
+      final url = Uri.parse('$agentServerUrl/api/story/action');
       final request = http.Request('POST', url);
       request.headers.addAll({
-        'Authorization': 'Bearer $supabaseAnonKey',
         'Content-Type': 'application/json',
       });
       
       request.body = jsonEncode({
-        'messages': _messages.where((m) => m.role != MessageRole.assistant || m.content.isNotEmpty).map((m) => m.toJson()).toList(),
-        'sessionId': _sessionId,
-        'userId': _userId,
+        'session_id': _sessionId,
+        'user_input': userMessage,
       });
 
       final streamedResponse = await request.send();
       
       if (streamedResponse.statusCode != 200) {
         final errorBody = await streamedResponse.stream.bytesToString();
-        _updateStreamingMessage('Edge Function 调用失败: ${streamedResponse.statusCode} $errorBody');
+        _updateStreamingMessage('Agent Server 调用失败: ${streamedResponse.statusCode} $errorBody');
         return;
       }
 
-      String accumulated = '';
-      var finalReceived = false;
-
-      // 解析 SSE 流
-      await for (final chunk in streamedResponse.stream.transform(utf8.decoder).transform(const LineSplitter())) {
-        if (!chunk.startsWith('data: ')) {
-          continue;
-        }
-
-        final data = chunk.substring(6);
-
-        if (data == '[DONE]') {
-          break;
-        }
-
-        try {
-          final json = jsonDecode(data) as Map<String, dynamic>;
-          if (json.containsKey('delta')) {
-            final delta = json['delta'] as String? ?? '';
-            accumulated += delta;
-            _updateStreamingMessage(accumulated);
-          } else if (json.containsKey('final')) {
-            final finalText = json['final'] as String?;
-            if (finalText != null) {
-              accumulated = finalText;
-              finalReceived = true;
-              _updateStreamingMessage(finalText, isFinal: true);
-            }
-          } else if (json.containsKey('error')) {
-            _updateStreamingMessage('错误: ${json['error']}', isFinal: true);
+      // 读取完整响应
+      final responseBody = await streamedResponse.stream.bytesToString();
+      final responseData = jsonDecode(responseBody) as Map<String, dynamic>;
+      
+      // 获取剧情内容
+      final story = responseData['story'] as String?;
+      if (story != null) {
+        _updateStreamingMessage(story, isFinal: true);
+        
+        // 检查章节状态
+        final chapterStatus = responseData['chapter_status'] as String?;
+        if (chapterStatus == 'ending') {
+          // 游戏结束
+          final ending = responseData['ending'] as Map<String, dynamic>?;
+          if (ending != null) {
+            debugPrint('游戏结束，结局类型: ${ending['ending_type']}');
           }
-        } catch (e) {
-          debugPrint('解析 SSE 数据失败: $e');
+        } else if (chapterStatus == 'next_chapter') {
+          debugPrint('进入下一章节');
         }
-      }
-
-      if (!finalReceived && accumulated.isNotEmpty) {
-        _updateStreamingMessage(accumulated, isFinal: true);
+      } else {
+        _updateStreamingMessage('未收到剧情响应', isFinal: true);
       }
     } catch (error) {
-      _updateStreamingMessage('Edge Function 未部署或调用失败：$error');
+      _updateStreamingMessage('Agent Server 调用失败：$error');
     }
   }
 
